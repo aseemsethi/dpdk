@@ -19,7 +19,7 @@ static: build/$(APP)-static
 	ln -sf $(APP)-static build/$(APP)
 
 PC_FILE := $(shell pkg-config --path libdpdk)
-CFLAGS += -O3 $(shell pkg-config --cflags libdpdk) -g
+CFLAGS += -O3 $(shell pkg-config --cflags libdpdk)
 LDFLAGS_SHARED = $(shell pkg-config --libs libdpdk)
 LDFLAGS_STATIC = -Wl,-Bstatic $(shell pkg-config --static --libs libdpdk)
 
@@ -48,7 +48,7 @@ RTE_TARGET ?= x86_64-native-linuxapp-gcc
 
 include $(RTE_SDK)/mk/rte.vars.mk
 
-CFLAGS += -O3
+CFLAGS += -O3 -g
 CFLAGS += $(WERROR_FLAGS)
 
 include $(RTE_SDK)/mk/rte.extapp.mk

@@ -140,9 +140,11 @@ static int parseArgs(int argc, char **argv) {
 	switch(opt) {
 	case 'p':
 		printf("MyApp: option p\n");
+		break;
 	case 'P':
 		printf("MyApp: option P\n");
 		promiscuous_on = 1;
+		break;
 	case 0:
             if (!strncmp(longopts[longindex].name, "config", sizeof("config"))) {
                 ret = parseConfig(optarg);
