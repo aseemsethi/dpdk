@@ -13,6 +13,7 @@
 #include <rte_common.h>
 #include <rte_memory.h>
 #include <rte_malloc.h>   // rte_free
+#include <rte_string_fns.h>
 #include <rte_version.h>
 #include <rte_atomic.h>
 #include <rte_memory.h>
@@ -117,10 +118,21 @@ one lcore of TX, and one lcore of kernel thread for each port:
 */
 static int parseConfig(const char *optarg) {
 	const char *p, *p0 = optarg;
-	char s[256];
-	unsigned size, i;
+	char s[256], *end;
+	unsigned size, i, nb_token;
 	uint16_t nb_kni_port_params = 0;
+    enum fieldnames {
+        FLD_PORT = 0,
+        FLD_LCORE_RX,
+        FLD_LCORE_TX,
+        _NUM_FLD = KNI_MAX_KTHREAD + 3,
+    };
+    char *str_fld[_NUM_FLD];
+    unsigned long int_fld[_NUM_FLD];
+	uint16_t port_id;
 
+	printf("MyApp: RTE_MAX_ETHPORTS=%d, KNI_MAX_KTHREAD=%d\n",
+			RTE_MAX_ETHPORTS, KNI_MAX_KTHREAD);
 	memset(&kni_port_params_array, 0, sizeof(kni_port_params_array));
 	while(((p = strchr(p0, '(')) != NULL) &&
 		nb_kni_port_params < RTE_MAX_ETHPORTS) {
@@ -135,6 +147,21 @@ static int parseConfig(const char *optarg) {
 		// asterisk (*) is used to pass the width specifier/precision
 		snprintf(s, sizeof(s), "%.*s", size, p);
 		printf("MyApp: config option:%.*s\n", size, p);
+		nb_token = rte_strsplit(s, sizeof(s), str_fld, _NUM_FLD, ',');
+		if (nb_token <= FLD_LCORE_TX) {
+			printf("MyApp: Invalid config params\n");
+			goto fail;
+		}
+		for(i = 0; i <nb_token; i++) {
+			errno = 0;
+			int_fld[i] = strtoul(str_fld[i], &end, 0);
+			if (errno != 0 || end == str_fld[i]) {
+			}
+		}
+		i = 0;
+		port_id = int_fld[i++];
+		printf("MyApp: port id: %d\n", port_id);
+
 	}
 	return 0;
 fail:
