@@ -10,7 +10,9 @@
 #include <signal.h>
 #include <getopt.h>
 
-
+#include <rte_common.h>
+#include <rte_memory.h>
+#include <rte_malloc.h>   // rte_free
 #include <rte_version.h>
 #include <rte_atomic.h>
 #include <rte_memory.h>
@@ -28,6 +30,7 @@
           [--socket-mem=MB,...] [-d LIB.so|DIR] [-m MB] [-r NUM] [-v] [--file-prefix] \
           [--proc-type <primary|secondary|auto>]
 option c or l is mandatory
+
 */
 
 // rte_kni.ko is present at 
@@ -107,12 +110,46 @@ static void signal_handler(int signum) {
 	}
 }
 
+/*
+To run the application with two ports served by six lcores, one lcore of RX, 
+one lcore of TX, and one lcore of kernel thread for each port:
+./build/kni -l 4-7 -n 4 -- -P -p 0x3 --config="(0,4,6,8),(1,5,7,9)"
+*/
 static int parseConfig(const char *optarg) {
-	printf("MyApp: Long option config, %d\n", *optarg);
+	const char *p, *p0 = optarg;
+	char s[256];
+	unsigned size, i;
+	uint16_t nb_kni_port_params = 0;
+
+	memset(&kni_port_params_array, 0, sizeof(kni_port_params_array));
+	while(((p = strchr(p0, '(')) != NULL) &&
+		nb_kni_port_params < RTE_MAX_ETHPORTS) {
+		p++;
+		if ((p0 = strchr(p, ')')) == NULL)
+			goto fail;
+		size = p0 - p;
+		if(size > sizeof(s)) {
+			printf("MyApp: Invalid config params\n");
+			goto fail;
+		}
+		// asterisk (*) is used to pass the width specifier/precision
+		snprintf(s, sizeof(s), "%.*s", size, p);
+		printf("MyApp: config option:%.*s\n", size, p);
+	}
 	return 0;
+fail:
+	for (i = 0; i < RTE_MAX_ETHPORTS; i++) {
+		if (kni_port_params_array[i]) {
+			rte_free(kni_port_params_array[i]);
+			kni_port_params_array[i] = NULL;
+		}
+	}
+	return 1;
 }
 
-/* Display usage instructions */
+/*
+ * Display usage instructions
+ */
 static void
 printUsage(const char *prgname)
 {
@@ -134,9 +171,7 @@ static int parseArgs(int argc, char **argv) {
 		{NULL, 0, NULL, 0}
 	};
 	//opterr = 0;
-	printf("MyApp: parsing args %d \n", argc);
 	while((opt = getopt_long(argc, argv, "p:P", longopts, &longindex)) != EOF) {
-	printf("MyApp: %d\n", opt);
 	switch(opt) {
 	case 'p':
 		printf("MyApp: option p\n");
@@ -147,6 +182,7 @@ static int parseArgs(int argc, char **argv) {
 		break;
 	case 0:
             if (!strncmp(longopts[longindex].name, "config", sizeof("config"))) {
+				printf("MyApp: option config found\n");
                 ret = parseConfig(optarg);
                 if (ret) {
                     printf("Invalid config\n");

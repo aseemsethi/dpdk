@@ -1,0 +1,5 @@
+Pinning the kernel thread to a specific core can be done using a taskset command 
+such as following:
+#taskset -p 100000 `pgrep --fl kni_thread | awk '{print $1}'`
+This command line tries to pin the specific kni_thread on the 20th lcore.
+
