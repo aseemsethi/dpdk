@@ -111,6 +111,22 @@ static void signal_handler(int signum) {
 	}
 }
 
+static void printConfig(void) {
+    uint32_t i, j;
+    struct kni_port_params **p = kni_port_params_array;
+
+    for (i = 0; i < RTE_MAX_ETHPORTS; i++) {
+        if (!p[i])
+            continue;
+        RTE_LOG(INFO, APP, "Port ID: %d\n", p[i]->port_id);
+        RTE_LOG(INFO, APP, "Rx lcore ID: %u, Tx lcore ID: %u\n",
+                    p[i]->lcore_rx, p[i]->lcore_tx);
+        for (j = 0; j < p[i]->nb_lcore_k; j++)
+            RTE_LOG(INFO, APP, "Kernel thread lcore ID: %u\n",
+                            p[i]->lcore_k[j]);
+    }
+}
+
 /*
 To run the application with two ports served by six lcores, one lcore of RX, 
 one lcore of TX, and one lcore of kernel thread for each port:
@@ -119,7 +135,7 @@ one lcore of TX, and one lcore of kernel thread for each port:
 static int parseConfig(const char *optarg) {
 	const char *p, *p0 = optarg;
 	char s[256], *end;
-	unsigned size, i, nb_token;
+	unsigned size, i, j, nb_token;
 	uint16_t nb_kni_port_params = 0;
     enum fieldnames {
         FLD_PORT = 0,
@@ -146,8 +162,8 @@ static int parseConfig(const char *optarg) {
 		}
 		// asterisk (*) is used to pass the width specifier/precision
 		snprintf(s, sizeof(s), "%.*s", size, p);
-		printf("MyApp: config option:%.*s\n", size, p);
 		nb_token = rte_strsplit(s, sizeof(s), str_fld, _NUM_FLD, ',');
+		printf("MyApp: config option:%.*s, nb_token=%d\n", size, p, nb_token);
 		if (nb_token <= FLD_LCORE_TX) {
 			printf("MyApp: Invalid config params\n");
 			goto fail;
@@ -161,8 +177,28 @@ static int parseConfig(const char *optarg) {
 		i = 0;
 		port_id = int_fld[i++];
 		printf("MyApp: port id: %d\n", port_id);
-
+		if(kni_port_params_array[port_id]) {
+			printf("MyApp: Port %d has already been configured\n", port_id);
+			goto fail;
+		}
+		kni_port_params_array[port_id] = rte_zmalloc("KNI_port_params",
+				sizeof(struct kni_port_params), RTE_CACHE_LINE_SIZE);
+		        kni_port_params_array[port_id]->port_id = port_id;
+        kni_port_params_array[port_id]->lcore_rx = (uint8_t)int_fld[i++];
+        kni_port_params_array[port_id]->lcore_tx = (uint8_t)int_fld[i++];
+		if (kni_port_params_array[port_id]->lcore_rx > RTE_MAX_LCORE ||
+			kni_port_params_array[port_id]->lcore_tx >= RTE_MAX_LCORE) {
+			printf("lcore_rx %u or lcore_tx %u ID could not "
+                        "exceed the maximum %u\n",
+			kni_port_params_array[port_id]->lcore_rx,
+			kni_port_params_array[port_id]->lcore_tx, (unsigned)RTE_MAX_LCORE);
+            goto fail;
+        }
+		for (j=0; i< nb_token && j < KNI_MAX_KTHREAD; i++,j++)
+			kni_port_params_array[port_id]->lcore_k[j] = (uint8_t)int_fld[i];
+        kni_port_params_array[port_id]->nb_lcore_k = j;
 	}
+	printConfig();
 	return 0;
 fail:
 	for (i = 0; i < RTE_MAX_ETHPORTS; i++) {
