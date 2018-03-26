@@ -13,6 +13,7 @@
 #include <rte_common.h>
 #include <rte_memory.h>
 #include <rte_malloc.h>   // rte_free
+#include <rte_errno.h>    // rte_strerror
 #include <rte_string_fns.h>
 #include <rte_version.h>
 #include <rte_atomic.h>
@@ -23,6 +24,8 @@
 #include <rte_lcore.h>
 #include <rte_debug.h>
 #include <rte_kni.h>
+#include <rte_mempool.h>
+#include <rte_mbuf.h>
 #include <rte_log.h>
 #include <rte_debug.h>
 
@@ -40,7 +43,39 @@ option c or l is mandatory
 /* Macros for printing using RTE_LOG */
 #define RTE_LOGTYPE_APP RTE_LOGTYPE_USER1
 
+/* Max size of a single packet */
+#define MAX_PACKET_SZ           2048
+
+/* Size of the data buffer in each mbuf */
+#define MBUF_DATA_SZ (MAX_PACKET_SZ + RTE_PKTMBUF_HEADROOM)
+
+/* Number of mbufs in mempool that is created */
+#define NB_MBUF                 100
+//(8192 * 16)
+
+/* How many packets to attempt to read from NIC in one go */
+#define PKT_BURST_SZ            32
+
+/* How many objects (mbufs) to keep in per-lcore mempool cache */
+#define MEMPOOL_CACHE_SZ        PKT_BURST_SZ
+
+/* Number of RX ring descriptors */
+#define NB_RXD                  1024
+
+/* Number of TX ring descriptors */
+#define NB_TXD                  1024
+
+/* Total octets in ethernet header */
+#define KNI_ENET_HEADER_SIZE    14
+
+/* Total octets in the FCS */
+#define KNI_ENET_FCS_SIZE       4
+
+#define KNI_US_PER_SECOND       1000000
+#define KNI_SECOND_PER_DAY      86400
+
 #define KNI_MAX_KTHREAD 32
+
 
 static rte_atomic32_t kni_stop = RTE_ATOMIC32_INIT(0);
 struct kni_interface_stats {
@@ -60,8 +95,9 @@ struct kni_port_params {
     unsigned lcore_k[KNI_MAX_KTHREAD]; /* lcore ID list for kthreads */
     struct rte_kni *kni[KNI_MAX_KTHREAD]; /* KNI context pointers */
 } __rte_cache_aligned;
-
 static struct kni_port_params *kni_port_params_array[RTE_MAX_ETHPORTS];
+/* Mempool for mbufs */
+static struct rte_mempool * pktmbuf_pool = NULL;
 static int promiscuous_on = 0;
 
 static int lcore_hello(__attribute__((unused)) void *arg) {
@@ -131,6 +167,16 @@ static void printConfig(void) {
 To run the application with two ports served by six lcores, one lcore of RX, 
 one lcore of TX, and one lcore of kernel thread for each port:
 ./build/kni -l 4-7 -n 4 -- -P -p 0x3 --config="(0,4,6,8),(1,5,7,9)"
+–config=”(port,lcore_rx, lcore_tx[,lcore_kthread, ...]) 
+			[, port,lcore_rx, lcore_tx[,lcore_kthread, ...]]”
+	- Determines which lcores of RX, TX, kernel thread are mapped to which ports.
+
+#insmod rte_kni.ko kthread_mode=single
+This mode will create only one kernel thread for all KNI devices for packet receiving 
+in kernel side. By default, it is in this single kernel thread mode. It can set 
+core affinity for this kernel thread by using Linux command taskset.
+#taskset -p 100000 `pgrep --fl kni_thread | awk '{print $1}'`
+
 */
 static int parseConfig(const char *optarg) {
 	const char *p, *p0 = optarg;
@@ -296,6 +342,16 @@ int main(int argc, char** argv) {
 	// Call it on the master core too - for a VM with just 1 core, only the following
 	// call happens.
 	lcore_hello(NULL);
+	printf("MyApp: rte_socket_id: %d\n", rte_socket_id());
+	// Create the mbuf pool
+	pktmbuf_pool = rte_pktmbuf_pool_create("mbuf_pool", NB_MBUF, 
+				MEMPOOL_CACHE_SZ, 0, MBUF_DATA_SZ, rte_socket_id());
+	if(pktmbuf_pool == NULL) {
+		rte_exit(EXIT_FAILURE, " mbuf pool failure: Error Code: %d:%s\n",	
+			rte_errno, rte_strerror(rte_errno));
+		return -1;
+	}
+
 	// Wait until all lcores finish their jobs.
 	// To be executed on the MASTER lcore only. 
 	// Issue an rte_eal_wait_lcore() for every lcore. The return values are ignored.
